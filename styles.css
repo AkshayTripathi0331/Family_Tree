@@ -1,0 +1,38 @@
+.link {
+    fill: none;
+    stroke: #555;
+    stroke-opacity: 0.4;
+    stroke-width: 1.5px;
+}
+
+.node circle,
+.node rect,
+.node path {
+    stroke: #999;
+    stroke-width: 1.5px;
+}
+
+.node text {
+    font: 10px sans-serif;
+    pointer-events: none;
+}
+
+.male {
+    fill: lightblue;
+}
+
+.female {
+    fill: pink;
+}
+
+.miscarriage {
+    fill: orange;
+}
+
+.termination {
+    fill: red;
+}
+
+.deceased {
+    fill: black;
+}

@@ -1,0 +1,388 @@
+<!-- <!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Family Tree</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        .male {
+            fill: lightblue;
+            stroke: blue;
+        }
+
+        .female {
+            fill: pink;
+            stroke: red;
+        }
+
+        .link {
+            fill: none;
+            stroke: #ccc;
+            stroke-width: 2px;
+        }
+
+        text {
+            font-family: Arial, sans-serif;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div style="margin: 5%;">
+    <svg width="960" height="600"></svg>
+    <script src="familyTree.js"></script>
+    </div>
+</body>
+</html> -->
+
+<!-- Editable node -->
+ 
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Family Tree with Draggable and Editable Nodes</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+      .node circle {
+        fill: #999;
+        stroke: #000;
+        stroke-width: 2px;
+      }
+      .node text {
+        font: 12px sans-serif;
+        pointer-events: none;
+      }
+      .link {
+        fill: none;
+        stroke: #555;
+        stroke-width: 1.5px;
+      }
+      .male {
+        fill: blue;
+      }
+      .female {
+        fill: pink;
+      }
+    </style>
+  </head>
+  <body>
+    <svg width="960" height="600"></svg>
+
+    <div>
+      <button id="add-child">Add Child</button>
+      <button id="add-parent">Add Parent</button>
+      <button id="add-partner">Add Partner</button>
+      <button id="add-stepbrother">Add Stepbrother</button>
+      <button id="add-stepsister">Add Stepsister</button>
+      <button id="delete-node">Delete Node</button>
+      <button id="undo">Undo</button>
+      <button id="redo">Redo</button>
+    </div>
+
+    <script>
+      d3.json("data.json").then((data) => {
+        const width = 960;
+        const height = 600;
+        const undoStack = [];
+        const redoStack = [];
+
+        const svg = d3
+          .select("svg")
+          .attr("width", width)
+          .attr("height", height);
+
+        const tree = d3.tree().size([height, width - 160]);
+
+        const stratify = d3
+          .stratify()
+          .id((d) => d.name)
+          .parentId((d) => d.mother);
+
+        const root = stratify(data);
+        tree(root);
+
+        const linkGroup = svg.append("g").attr("class", "links");
+        const nodeGroup = svg.append("g").attr("class", "nodes");
+
+        let link = linkGroup
+          .selectAll(".link")
+          .data(root.links())
+          .enter()
+          .append("path")
+          .attr("class", "link")
+          .attr(
+            "d",
+            d3
+              .linkHorizontal()
+              .x((d) => d.y)
+              .y((d) => d.x)
+          );
+
+        let node = nodeGroup
+          .selectAll(".node")
+          .data(root.descendants())
+          .enter()
+          .append("g")
+          .attr("class", "node")
+          .attr("transform", (d) => `translate(${d.y},${d.x})`)
+          .call(
+            d3
+              .drag()
+              .on("start", dragStarted)
+              .on("drag", dragged)
+              .on("end", dragEnded)
+          );
+
+        node
+          .append("circle")
+          .attr("class", (d) => (d.data.sex === "M" ? "male" : "female"))
+          .attr("r", 10);
+
+        node
+          .append("text")
+          .attr("dy", 3)
+          .attr("x", (d) => (d.children ? -12 : 12))
+          .style("text-anchor", (d) => (d.children ? "end" : "start"))
+          .text((d) => d.data.display_name);
+
+        let selectedNode = null;
+        node.on("click", (event, d) => {
+          selectedNode = d;
+          d3.selectAll(".node").select("circle").style("stroke", null);
+          d3.select(event.currentTarget)
+            .select("circle")
+            .style("stroke", "red");
+        });
+
+        function saveState() {
+          const state = node.data().map((d) => ({ x: d.x, y: d.y }));
+          undoStack.push(state);
+          redoStack.length = 0; // Clear the redo stack
+        }
+
+        function addNode(type) {
+          if (!selectedNode) return;
+
+          const newNode = {
+            name: Date.now().toString(),
+            display_name: `New ${type}`,
+            sex: type.startsWith("step") ? "M" : selectedNode.data.sex,
+          };
+          let change = { type: "addNode", node: newNode };
+
+          switch (type) {
+            case "child":
+              newNode.mother =
+                selectedNode.data.sex === "F"
+                  ? selectedNode.data.name
+                  : selectedNode.data.partner;
+              newNode.father =
+                selectedNode.data.sex === "M"
+                  ? selectedNode.data.name
+                  : selectedNode.data.partner;
+              break;
+            case "parent":
+              newNode.name = `parent_${Date.now()}`;
+              if (selectedNode.data.sex === "M")
+                newNode.children = [selectedNode.data.name];
+              else newNode.children = selectedNode.data.name;
+              break;
+            case "partner":
+              newNode.partner = selectedNode.data.name;
+              selectedNode.data.partner = newNode.name;
+              break;
+            case "stepbrother":
+            case "stepsister":
+              newNode.mother = selectedNode.data.mother;
+              newNode.father = selectedNode.data.father;
+              break;
+          }
+
+          data.push(newNode);
+          updateTree();
+          saveState(change);
+        }
+
+        function deleteNode() {
+          if (!selectedNode) return;
+
+          const index = data.findIndex(
+            (d) => d.name === selectedNode.data.name
+          );
+          if (index !== -1) {
+            let change = { type: "deleteNode", node: data[index] };
+            data.splice(index, 1);
+            updateTree();
+            saveState(change);
+          }
+        }
+
+        function undo() {
+          if (undoStack.length > 0) {
+            const change = undoStack.pop();
+            redoStack.push(change);
+            switch (change.type) {
+              case "addNode":
+                deleteNodeByName(change.node.name);
+                break;
+              case "deleteNode":
+                data.push(change.node);
+                updateTree();
+                break;
+            }
+          }
+        }
+
+        function redo() {
+          if (redoStack.length > 0) {
+            const change = redoStack.pop();
+            undoStack.push(change);
+            switch (change.type) {
+              case "addNode":
+                data.push(change.node);
+                updateTree();
+                break;
+              case "deleteNode":
+                deleteNodeByName(change.node.name);
+                break;
+            }
+          }
+        }
+
+        function deleteNodeByName(name) {
+          const index = data.findIndex((d) => d.name === name);
+          if (index !== -1) {
+            data.splice(index, 1);
+            updateTree();
+          }
+        }
+
+        function updateTree() {
+          const newRoot = stratify(data);
+          tree(newRoot);
+
+          link = linkGroup
+            .selectAll(".link")
+            .data(newRoot.links(), (d) => d.target.id);
+
+          link.exit().remove();
+
+          link
+            .enter()
+            .append("path")
+            .attr("class", "link")
+            .attr(
+              "d",
+              d3
+                .linkHorizontal()
+                .x((d) => d.y)
+                .y((d) => d.x)
+            );
+
+          node = nodeGroup
+            .selectAll(".node")
+            .data(newRoot.descendants(), (d) => d.id);
+
+          node.exit().remove();
+
+          const enterNode = node
+            .enter()
+            .append("g")
+            .attr("class", "node")
+            .attr("transform", (d) => `translate(${d.y},${d.x})`)
+            .call(
+              d3
+                .drag()
+                .on("start", dragStarted)
+                .on("drag", dragged)
+                .on("end", dragEnded)
+            );
+
+          enterNode
+            .append("circle")
+            .attr("class", (d) => (d.data.sex === "M" ? "male" : "female"))
+            .attr("r", 10);
+
+          enterNode
+            .append("text")
+            .attr("dy", 3)
+            .attr("x", (d) => (d.children ? -12 : 12))
+            .style("text-anchor", (d) => (d.children ? "end" : "start"))
+            .text((d) => d.data.display_name);
+
+          node = enterNode.merge(node);
+
+          node.on("click", (event, d) => {
+            selectedNode = d;
+            d3.selectAll(".node").select("circle").style("stroke", null);
+            d3.select(event.currentTarget)
+              .select("circle")
+              .style("stroke", "red");
+          });
+
+          node.attr("transform", (d) => `translate(${d.y},${d.x})`);
+
+          link.attr(
+            "d",
+            d3
+              .linkHorizontal()
+              .x((d) => d.y)
+              .y((d) => d.x)
+          );
+        }
+
+        function restoreState(state) {
+          data = JSON.parse(JSON.stringify(state));
+          updateTree();
+        }
+
+        function update() {
+          node.attr("transform", (d) => `translate(${d.y},${d.x})`);
+
+          link.data(root.links()).attr(
+            "d",
+            d3
+              .linkHorizontal()
+              .x((d) => d.y)
+              .y((d) => d.x)
+          );
+        }
+        function dragStarted(event, d) {
+          saveState();
+          d3.select(this).raise().classed("active", true);
+        }
+
+        function dragged(event, d) {
+          d.x = event.y;
+          d.y = event.x;
+          d3.select(this).attr("transform", `translate(${d.y},${d.x})`);
+          link.attr(
+            "d",
+            d3
+              .linkHorizontal()
+              .x((d) => d.y)
+              .y((d) => d.x)
+          );
+        }
+
+        function dragEnded(event, d) {
+          d3.select(this).classed("active", false);
+          update();
+        }
+
+        d3.select("#add-child").on("click", () => addNode("child"));
+        d3.select("#add-parent").on("click", () => addNode("parent"));
+        d3.select("#add-partner").on("click", () => addNode("partner"));
+        d3.select("#add-stepbrother").on("click", () => addNode("stepbrother"));
+        d3.select("#add-stepsister").on("click", () => addNode("stepsister"));
+        d3.select("#delete-node").on("click", deleteNode);
+        d3.select("#undo").on("click", undo);
+        d3.select("#redo").on("click", redo);
+      });
+    </script>
+  </body>
+</html>
